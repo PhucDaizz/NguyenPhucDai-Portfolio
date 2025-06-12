@@ -46,43 +46,56 @@ async function getGithubProjectsData(): Promise<Project[] | null> {
     const projectsWithImages = await Promise.all(
       topRepos.map(async (repo) => {
         let imageUrl = "https://placehold.co/600x400.png"; // Default placeholder
+        const imageHint = repo.name.split('-').slice(0, 2).join(' ') || "project code";
         const readmeContentUrl = `https://raw.githubusercontent.com/phucdaizz/${repo.name}/master/README.md`;
         
         try {
           const readmeResponse = await fetch(readmeContentUrl);
           if (readmeResponse.ok) {
             const readmeContent = await readmeResponse.text();
-            const imageRegex = /!\[.*?\]\((.*?)\)/;
-            const match = readmeContent.match(imageRegex);
+            let extractedSrc = null;
 
-            if (match && match[1]) {
-              let foundUrlStr = match[1];
+            const htmlImgRegex = /<img[^>]+src\s*=\s*['"]([^'"]+)['"][^>]*>/i;
+            const htmlMatch = readmeContent.match(htmlImgRegex);
+            if (htmlMatch && htmlMatch[1]) {
+              extractedSrc = htmlMatch[1];
+            } else {
+              const markdownImgRegex = /!\[.*?\]\((.*?)\)/;
+              const markdownMatch = readmeContent.match(markdownImgRegex);
+              if (markdownMatch && markdownMatch[1]) {
+                extractedSrc = markdownMatch[1];
+              }
+            }
+
+            if (extractedSrc) {
               try {
                 const baseForRuleResolution = readmeContentUrl.substring(0, readmeContentUrl.lastIndexOf('/') + 1);
-                const resolvedUrl = new URL(foundUrlStr, baseForRuleResolution);
+                const resolvedUrl = new URL(extractedSrc, baseForRuleResolution);
                 const potentialImageUrl = resolvedUrl.href;
 
-                const imageExtensions = ['.png']; 
+                const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'];
                 const pathname = resolvedUrl.pathname.toLowerCase();
                 const hasImageExtension = imageExtensions.some(ext => pathname.endsWith(ext));
                 
-                if (hasImageExtension) {
+                if (hasImageExtension || potentialImageUrl.includes('iili.io') ) {
                    imageUrl = potentialImageUrl;
                 }
               } catch (urlError) {
-                console.warn(`Invalid URL found or error constructing URL in README for ${repo.name}: ${foundUrlStr}`, urlError);
+                console.warn(`Error resolving or validating image URL "${extractedSrc}" for repo ${repo.name}:`, urlError);
               }
             }
+          } else {
+            console.warn(`Failed to fetch README for ${repo.name}: ${readmeResponse.statusText}`);
           }
         } catch (e) {
-          console.warn(`Failed to fetch or parse README for ${repo.name}:`, e);
+          console.warn(`Error fetching or processing README for ${repo.name}:`, e);
         }
 
         return {
           title: repo.name.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
           description: repo.description,
           image: imageUrl,
-          imageHint: repo.name.split('-').slice(0, 2).join(' ') || "project code",
+          imageHint: imageHint,
           liveLink: repo.homepage,
           githubLink: repo.html_url,
           tags: repo.topics.length > 0 ? repo.topics : (repo.language ? [repo.language] : []),
@@ -107,10 +120,11 @@ export default function ProjectsSection() {
     async function loadProjects() {
       try {
         setLoading(true);
+        setError(null);
         const fetchedProjects = await getGithubProjectsData();
         setProjects(fetchedProjects);
         if (!fetchedProjects) {
-          setError("Failed to load projects from GitHub.");
+          setError("Failed to load projects from GitHub. Some projects might not display an image or may show a placeholder.");
         }
       } catch (err) {
         console.error("Error in ProjectsSection useEffect:", err);
@@ -145,7 +159,6 @@ export default function ProjectsSection() {
             </CardHeader>
             <CardContent>
               <p className="text-muted-foreground">Please wait while projects are being fetched from GitHub.</p>
-              {/* Optional: Add a spinner or skeleton loader here */}
             </CardContent>
           </Card>
         )}
@@ -155,7 +168,7 @@ export default function ProjectsSection() {
             <CardHeader>
               <CardTitle className="flex items-center justify-center gap-2">
                 <AlertTriangle className="h-6 w-6 text-destructive" />
-                Could Not Load Projects
+                Could Not Load All Project Details
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -177,18 +190,19 @@ export default function ProjectsSection() {
           </Card>
         )}
 
-        {!loading && !error && projects && projects.length > 0 && (
+        {!loading && projects && projects.length > 0 && (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((project) => (
               <Card key={project.title} className="flex flex-col overflow-hidden shadow-lg rounded-xl transition-all duration-300 ease-in-out hover:shadow-2xl hover:ring-2 hover:ring-primary/40 hover:scale-[1.02] animate-in fade-in-0 slide-in-from-bottom-4 duration-500 ease-out">
-                <CardHeader className="p-0">
+                <CardHeader className="px-4 pt-6 pb-4 relative w-full h-48">
                   <Image
                     src={project.image}
                     alt={project.title}
-                    width={600}
+                    width={600} 
                     height={400}
-                    className="h-48 w-full object-cover"
+                    className="absolute inset-0 h-full w-full object-contain rounded-md shadow-sm" 
                     data-ai-hint={project.imageHint}
+                    unoptimized={project.image.startsWith('https://raw.githubusercontent.com')} 
                   />
                 </CardHeader>
                 <CardContent className="p-6 flex-grow">
@@ -236,4 +250,3 @@ export default function ProjectsSection() {
     </section>
   );
 }
-
